@@ -10,12 +10,13 @@ import java.util.List;
 
 public class Main {
     public static void main(String[] args) {
-        System.out.println("=== J-RouterAI Key Pool Failover Simulation ===");
+        System.out.println("=== J-RouterAI Model Swap Simulation ===");
 
         PromptRequest request = new PromptRequest("What is the difference between a process and a thread?");
 
-        // Gemini: first key is broken (empty), second key is valid
-        AIProvider gemini = new GeminiProvider(List.of("", "gemini-real-key-002"));
+        GeminiProvider gemini = new GeminiProvider(List.of("gemini-key-001", "gemini-key-002"));
+        gemini.setForceFailOnModel("gemini-1.5-pro"); // force primary model to fail on every key
+
         AIProvider groq = new GroqProvider(List.of("groq-real-key-001"));
 
         LLMOrchestrator orchestrator = new LLMOrchestrator(List.of(gemini, groq));

@@ -8,14 +8,17 @@ import java.util.List;
 public class GeminiProvider implements AIProvider {
     private final List<String> apiKeys;
     private int currentKeyIndex = 0;
-    private boolean simulateFailure = false;
+    private String forceFailOnModel = null;
+
+    private static final String PRIMARY_MODEL = "gemini-1.5-pro";
+    private static final String BACKUP_MODEL = "gemini-1.5-flash";
 
     public GeminiProvider(List<String> apiKeys) {
         this.apiKeys = apiKeys;
     }
 
-    public void setSimulateFailure(boolean simulateFailure) {
-        this.simulateFailure = simulateFailure;
+    public void setForceFailOnModel(String modelName) {
+        this.forceFailOnModel = modelName;
     }
 
     @Override
@@ -24,8 +27,20 @@ public class GeminiProvider implements AIProvider {
             throw new IllegalStateException("No Gemini API keys configured.");
         }
 
-        Exception lastError = null;
+        // Layer 1: try all keys against the primary model
+        AIResponse result = tryAllKeys(request, PRIMARY_MODEL);
+        if (result != null) return result;
 
+        System.out.println("[Gemini] All keys failed on " + PRIMARY_MODEL + ". Swapping to backup model: " + BACKUP_MODEL);
+
+        // Layer 2: try all keys again against the backup model
+        result = tryAllKeys(request, BACKUP_MODEL);
+        if (result != null) return result;
+
+        throw new RuntimeException("All Gemini keys exhausted on both " + PRIMARY_MODEL + " and " + BACKUP_MODEL + ".");
+    }
+
+    private AIResponse tryAllKeys(PromptRequest request, String modelName) {
         for (int attempt = 0; attempt < apiKeys.size(); attempt++) {
             String key = apiKeys.get(currentKeyIndex);
             long startTime = System.currentTimeMillis();
@@ -34,29 +49,24 @@ public class GeminiProvider implements AIProvider {
                 if (key == null || key.isEmpty()) {
                     throw new IllegalStateException("Key #" + currentKeyIndex + " is missing or invalid.");
                 }
-                if (simulateFailure) {
-                    throw new RuntimeException("429 Too Many Requests - key #" + currentKeyIndex + " rate limited");
+                if (modelName.equals(forceFailOnModel)) {
+                    throw new RuntimeException("429 Too Many Requests - " + modelName + " overloaded");
                 }
 
                 long duration = System.currentTimeMillis() - startTime;
                 return new AIResponse(
-                        "Response from Gemini for: " + request.prompt(),
+                        "Response from Gemini (" + modelName + ") for: " + request.prompt(),
                         getProviderName(),
-                        "gemini-1.5-flash",
+                        modelName,
                         duration,
                         true
                 );
             } catch (Exception e) {
-                System.out.println("[Gemini] Key #" + currentKeyIndex + " failed: " + e.getMessage());
-                lastError = e;
-                currentKeyIndex = (currentKeyIndex + 1) % apiKeys.size(); // sticky: move on and stay there
+                System.out.println("[Gemini] Key #" + currentKeyIndex + " failed on " + modelName + ": " + e.getMessage());
+                currentKeyIndex = (currentKeyIndex + 1) % apiKeys.size();
             }
         }
-
-        throw new RuntimeException(
-                "All Gemini keys exhausted. Last error: " +
-                        (lastError != null ? lastError.getMessage() : "unknown")
-        );
+        return null;
     }
 
     @Override
